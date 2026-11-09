@@ -45,7 +45,9 @@ R_CRIT = 0.355          # 双侧 α=0.05, df=29 → t=2.045 → r = t/√(t²+29
 COMPONENTS = ("u", "v")
 
 LAT_MIN = 60.0          # 视场：60°N 以北，与原文一致
-ARROW_DEG = 2.0         # 离线路径：参考矢量的半径长度（度）
+LAT_ARROW_MAX = 84.0    # 更北不画箭头：经线在极点挤成一圈黑环
+ARROW_DEG = 2.6         # 参考矢量的半径长度（度）
+ARROW_CLIP = 2.2        # 超过参考值 2.2 倍的箭头截断，避免个别极值撑爆版面
 COAST_NPZ = Path(__file__).with_name("_coastline.npz")
 
 
@@ -87,7 +89,34 @@ def _nice(v: float) -> float:
 
 
 def _arrow_ref(u: np.ndarray, v: np.ndarray) -> float:
-    return _nice(float(np.nanpercentile(np.hypot(u, v), 92)))
+    """参考矢量取 75 百分位：多数箭头接近满长，少数极值靠 ARROW_CLIP 截断。"""
+    return _nice(float(np.nanpercentile(np.hypot(u, v), 75)))
+
+
+def _samples(lat_n: np.ndarray, lon: np.ndarray, u: np.ndarray, v: np.ndarray):
+    """
+    按纬度自适应稀疏化：经线在极点收敛，固定经度间隔会让箭头挤成一圈。
+    同时丢掉 84°N 以北，那里只剩噪声。
+    """
+    la, lo, uu, vv = [], [], [], []
+    for j, phi in enumerate(lat_n):
+        if phi > LAT_ARROW_MAX:
+            continue
+        s = max(2, int(round(2.0 / max(np.cos(np.deg2rad(phi)), 0.06))))
+        la.append(np.full(lon[::s].size, phi))
+        lo.append(lon[::s])
+        uu.append(u[j, ::s])
+        vv.append(v[j, ::s])
+    return (np.concatenate(la), np.concatenate(lo),
+            np.concatenate(uu), np.concatenate(vv))
+
+
+def _clip_mag(u: np.ndarray, v: np.ndarray, ref: float) -> tuple[np.ndarray, np.ndarray]:
+    """把超过 ARROW_CLIP×ref 的矢量截断到该长度，方向不变。"""
+    mag = np.hypot(u, v)
+    limit = ARROW_CLIP * ref
+    f = np.where(mag > limit, limit / np.maximum(mag, 1e-12), 1.0)
+    return u * f, v * f
 
 
 def _plot_cartopy(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) -> bool:
@@ -104,7 +133,6 @@ def _plot_cartopy(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) 
         north = lat >= LAT_MIN
         lat_n = lat[north]
         LONg, LATg = np.meshgrid(lon, lat_n)
-        sl = (slice(None, None, 2), slice(None, None, 2))
         circ = np.arange(0.0, 361.0, 1.0)
 
         fig = plt.figure(figsize=(10.0, 5.4), constrained_layout=True)
@@ -124,13 +152,14 @@ def _plot_cartopy(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) 
             ax.scatter(LONg[sig], LATg[sig], s=1.6, c="0.35", marker=".", linewidths=0,
                        alpha=0.35, transform=ccrs.PlateCarree(), zorder=3.5)
 
-            bu = reg[f"b_u_{s}"][north, :][sl]
-            bv = reg[f"b_v_{s}"][north, :][sl]
+            la_s, lo_s, bu, bv = _samples(lat_n, lon, reg[f"b_u_{s}"][north, :],
+                                          reg[f"b_v_{s}"][north, :])
             ref = _arrow_ref(bu, bv)
-            q = ax.quiver(LONg[sl], LATg[sl], bu, bv, transform=ccrs.PlateCarree(),
+            bu, bv = _clip_mag(bu, bv, ref)
+            q = ax.quiver(lo_s, la_s, bu, bv, transform=ccrs.PlateCarree(),
                           scale=ref / 0.35, scale_units="inches", color="0.05",
-                          width=0.0016, headwidth=3.4, headlength=4.2,
-                          headaxislength=3.8, pivot="middle", zorder=4)
+                          width=0.0018, headwidth=3.6, headlength=4.4,
+                          headaxislength=4.0, pivot="middle", zorder=4)
             ax.quiverkey(q, 0.04, 0.03, ref, f"{ref:g} m/s per $10^6$ km$^2$",
                          coordinates="axes", labelpos="E", labelsep=0.05,
                          fontproperties={"size": 6}, labelcolor="0.25")
@@ -163,7 +192,6 @@ def _plot_local(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) ->
     TH0, RR = np.meshgrid(lam, rho)
     X0, Y0 = RR * np.sin(TH0), -RR * np.cos(TH0)
     r_out = 90.0 - LAT_MIN
-    step = 2
     ang = np.deg2rad(np.arange(0.0, 360.0, 2.0))
 
     fig, axes = plt.subplots(1, 2, figsize=(10.0, 5.4), constrained_layout=True,
@@ -206,14 +234,17 @@ def _plot_local(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) ->
         ax.scatter(X0[sig], Y0[sig], s=1.6, c="0.35", marker=".", linewidths=0,
                    alpha=0.35, rasterized=True, zorder=3.5)
 
-        th = TH0[::step, ::step]
-        bu = reg[f"b_u_{s}"][north, :][::step, ::step]
-        bv = reg[f"b_v_{s}"][north, :][::step, ::step]
+        la_s, lo_s, bu, bv = _samples(lat_n, lon, reg[f"b_u_{s}"][north, :],
+                                      reg[f"b_v_{s}"][north, :])
+        ref = _arrow_ref(bu, bv)
+        bu, bv = _clip_mag(bu, bv, ref)
         # 极射赤面投影下把 (u, v) 旋转到图面：east→(cosλ, sinλ)，north→(−sinλ, cosλ)
-        qu = bu * np.cos(th) - bv * np.sin(th)
-        qv = bu * np.sin(th) + bv * np.cos(th)
-        ref = _arrow_ref(qu, qv)
-        q = ax.quiver(X0[::step, ::step], Y0[::step, ::step], qu, qv,
+        lam_s = np.deg2rad(lo_s)
+        rho_s = 90.0 - la_s
+        xs, ys = rho_s * np.sin(lam_s), -rho_s * np.cos(lam_s)
+        qu = bu * np.cos(lam_s) - bv * np.sin(lam_s)
+        qv = bu * np.sin(lam_s) + bv * np.cos(lam_s)
+        q = ax.quiver(xs, ys, qu, qv,
                       scale=ref / ARROW_DEG, scale_units="xy", angles="xy",
                       color="0.05", width=0.0016, headwidth=3.4, headlength=4.2,
                       headaxislength=3.8, pivot="middle", zorder=4)
