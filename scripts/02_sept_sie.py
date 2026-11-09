@@ -237,41 +237,51 @@ def main() -> int:
         if years.size != 530:
             print(f"[警告] 文件月数 {years.size}，与文件名 197811-202212（530 个月）不符")
 
-        # ---- 浓度单位自检：这个文件没有 units 属性，只能看量级 ----
-        vals = np.asarray(ice.values)
-        finite = vals[np.isfinite(vals) & (np.abs(vals) < HUGE)]
-        vmax = float(finite.max()) if finite.size else float("nan")
-        if vmax > 1.5:
-            scale, unit = 1.0, "%"
-        elif vmax <= 1.0:
-            scale, unit = 100.0, "fraction"
-            print(f"[单位] 最大值 {vmax:.3f} ≤ 1，判定为 0–1，已 ×100 转成 %")
-        else:
-            raise ValueError(f"浓度最大值 {vmax:.3f} 落在 1–1.5 之间，无法判定单位，停下")
-        print(f"[单位] 浓度按 {unit} 处理（有限值最大 {vmax:.2f}）")
-        ice = ice * scale
+        # ---- 缺测统计：先判缺测再判单位，-999 不能参与"最大值"判断 ----
+        vals = np.asarray(ice.values, dtype="float64")
+        with np.errstate(invalid="ignore"):   # NaN 参与 <、== 比较会告警，这里显式忽略
+            finite_mask = np.isfinite(vals)
+            n_nan_all = int((~finite_mask).sum())
+            n_fill_lit = int((vals == FILL).sum())
+            n_huge = int((np.abs(vals) > HUGE).sum())
 
-        # ---- 缺测统计 ----
-        n_nan_all = int(np.isnan(vals).sum())
         n_fill_attr = float(ice.attrs.get("_FillValue", FILL))
         print(f"[缺测] 全文件 NaN = {n_nan_all} 个（{n_nan_all / vals.size * 100:.2f}%），"
-              f"_FillValue = {n_fill_attr:g}（xarray 已解成 NaN）")
-        n_huge = int((np.abs(vals) > HUGE).sum())
-        if n_huge:
-            print(f"[缺测] 发现 {n_huge} 个未解码的大数，已置为 NaN")
-            ice = ice.where(np.abs(ice) < HUGE)
-        # 兜底：万一 xarray 没把 -999 解成 NaN（不同版本的 _FillValue/missing_value 处理差异）
-        n_fill_lit = int((vals == FILL).sum())
+              f"_FillValue = {n_fill_attr:g}（xarray 应已解成 NaN）")
+
+        # 兜底：万一 xarray 没把 -999 解成 NaN（不同版本对 _FillValue / missing_value 处理有差异）
         if n_fill_lit:
             print(f"[缺测] 发现 {n_fill_lit} 个字面 -999 未被解码，已置为 NaN")
             ice = ice.where(ice != FILL)
+        if n_huge:
+            print(f"[缺测] 发现 {n_huge} 个未解码的大数，已置为 NaN")
+            ice = ice.where(np.abs(ice) < HUGE)
+
+        # ---- 浓度单位自检：这个文件没有 units 属性，只能看量级 ----
+        with np.errstate(invalid="ignore"):
+            clean = np.asarray(ice.values, dtype="float64")
+            clean = clean[np.isfinite(clean)]
+        vmax = float(np.abs(clean).max()) if clean.size else float("nan")
+        if vmax >= 10.0:
+            scale, unit = 1.0, "%"
+        elif vmax <= 1.5:
+            # 含 vmax 正好 1.0 的情形：浮点上是 1.0000000000000002，不能用 <= 1.0 卡
+            scale, unit = 100.0, "0–1 分数"
+            print(f"[单位] 有限值最大 |{vmax:.6f}| ≤ 1.5，判定为 0–1 分数，已 ×100 转成 %")
+        else:
+            raise ValueError(
+                f"浓度最大值 {vmax:.3f} 落在 1.5–10 之间，既不像 % 也不像 0–1，无法判定，停下"
+            )
+        print(f"[单位] 浓度按 {unit} 处理（有限值最大 |{vmax:.4f}|）")
+        ice = ice * scale
 
         # ---- 格点面积 ----
         area = cell_area_km2(lat, lon, EARTH_RADIUS_KM)          # (lat, lon) km²
         north = lat > 0.0                                        # 只要北半球
         area_nh = float(area[north, :].sum())
+        nh_theory = 2.0 * np.pi * EARTH_RADIUS_KM ** 2 / 1e6
         print(f"[面积] 格点面积 {area.min():.1f}–{area.max():.1f} km²，"
-              f"北半球总面积 {area_nh / 1e6:.1f}×10⁶ km²（理论 2πR² = 254.9×10⁶）")
+              f"北半球总面积 {area_nh / 1e6:.1f}×10⁶ km²（理论 2πR² = {nh_theory:.1f}×10⁶）")
         if not (240e6 < area_nh < 270e6):
             raise ValueError(f"北半球总面积 {area_nh:.3e} km² 不合理，面积公式或网格有问题")
         print(f"[面积] 半径取 {EARTH_RADIUS_KM:g} km；若取赤道半径 {EQUATORIAL_RADIUS_KM:g} km，"
