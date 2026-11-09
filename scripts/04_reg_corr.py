@@ -45,7 +45,7 @@ R_CRIT = 0.355          # 双侧 α=0.05, df=29 → t=2.045 → r = t/√(t²+29
 COMPONENTS = ("u", "v")
 
 LAT_MIN = 60.0          # 视场：60°N 以北，与原文一致
-LAT_ARROW_MAX = 84.0    # 更北不画箭头：经线在极点挤成一圈黑环
+LAT_ARROW_MAX = 89.0    # 只排除极点那一行：rho=0，144 个经度重合在一个点上
 ARROW_DEG = 2.6         # 参考矢量的半径长度（度）
 ARROW_CLIP = 2.2        # 超过参考值 2.2 倍的箭头截断，避免个别极值撑爆版面
 # 出图符号：原文画的是「少冰年对应的风异常」，等价于 −b（b 是每 +1×10⁶ km² SIE 的风异常）。
@@ -105,7 +105,7 @@ def _samples(lat_n: np.ndarray, lon: np.ndarray, u: np.ndarray, v: np.ndarray):
     for j, phi in enumerate(lat_n):
         if phi > LAT_ARROW_MAX:
             continue
-        s = max(2, int(round(1.0 / max(np.cos(np.deg2rad(phi)), 0.06))))
+        s = int(np.clip(round(1.0 / max(np.cos(np.deg2rad(phi)), 0.02)), 2, 10))
         la.append(np.full(lon[::s].size, phi))
         lo.append(lon[::s])
         uu.append(u[j, ::s])
