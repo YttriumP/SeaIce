@@ -14,8 +14,9 @@
 
 ## 2. 运行环境
 
-- 代码运行在 Linux 服务器，工作区 `/home/gst/lcx`
-- Python 3，优先 `xarray` + `numpy`；没有 xarray 时用 `netCDF4`，并在文件头注明依赖
+- 代码运行在 Linux 服务器，项目根 `/home/gst/lcx/SeaIce`（`/home/gst/lcx` 只是父目录）；
+  路径用 `Path(__file__).resolve().parents[1]` 推，不写死
+- Python 3，用 `/usr/bin/python3`（已含 `xarray` + `netcdf4`，实测不需要 venv / conda）
 - 无 GUI：matplotlib 必须 `matplotlib.use("Agg")`
 - 不要写 Windows 路径（`C:\...`），不要写死 `~/`，用相对项目根的路径
 - 不改 `conda` 环境、不 `pip install`（除非人类明确要求）

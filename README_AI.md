@@ -49,14 +49,14 @@
 ## 4. 运行环境
 
 - 本地：Windows + VSCode + Remote-SSH
-- 服务器：Linux，工作区 **`/home/gst/lcx`**
+- 服务器：Linux，项目根 **`/home/gst/lcx/SeaIce`**（`/home/gst/lcx` 只是它的父目录）
 - 数据盘：`/data`（机械盘）与 `/SSD1`（NVMe，**优先读**）；在线索引 https://server.feliks.top/
-- **数据盘只读**：禁止写入、删除、移动；产物一律写 `/home/gst/lcx/`
-- 调度：待确认（Slurm `sbatch` / 直接 `bash`）
-- Python 环境：待确认（`conda activate` 的环境名）
-- 目录约定（建议）：
-  - 代码：`/home/gst/lcx/scripts/`
-  - 输出：`/home/gst/lcx/out/`、`figs/`、`logs/`
+- **数据盘只读**：禁止写入、删除、移动；产物一律写 `/home/gst/lcx/SeaIce/`
+- 调度：直接 `bash`（目前未用 Slurm）
+- Python 环境：**`/usr/bin/python3`**（系统解释器，已含 xarray + netcdf4，实测不需要 venv / conda）
+- 目录约定：
+  - 代码：`/home/gst/lcx/SeaIce/scripts/`
+  - 输出：`/home/gst/lcx/SeaIce/out/`、`figs/`、`logs/`
 
 ## 5. 给 AI 的常驻规则
 
@@ -74,9 +74,10 @@
 
 ## 6. 当前进度（每周五更新）
 
-- 已完成：确定课题方向与三篇核心文献；建立工作区与文档
-- 进行中：Ogi et al. (2010) 的复现准备（数据、时段、图目录）
-- 卡住：NPO 与 WP 的定义口径待与导师确认
+- 已完成：确定课题方向与三篇核心文献；建立工作区与文档；
+  `01_load_ncep.py` 跑通（925 hPa u/v，1979–2009，372 个月、31 个 9 月、零缺测）
+- 进行中：`02_sept_sie.py`（Bootstrap SIC → 9 月 SIE 31 年 + ΔSIE 30 年），等 SIC 文件 `ncdump`
+- 卡住：NPO 与 WP 的定义口径待与导师确认（不影响复现）
 - 下周计划：见 `reproduction_plan.md`
 
 ## 7. 文件索引
