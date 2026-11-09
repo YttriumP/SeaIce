@@ -290,7 +290,8 @@ def main() -> int:
         # 南半球 9 月有大量海冰：证明必须加 north 遮罩，而不是靠"北极网格本来就没有南半球"
         sample = ice.isel(time=0).values
         sh = lat <= 0.0
-        n_sh_ice = int((sample[sh, :] > THRESHOLD_PCT).sum())
+        with np.errstate(invalid="ignore"):   # NaN 参与 > 比较会告警
+            n_sh_ice = int((sample[sh, :] > THRESHOLD_PCT).sum())
         print(f"[区域] 首个时次南半球 >15% 的格点 = {n_sh_ice} 个 → "
               f"{'确是全球网格，已加北半球遮罩' if n_sh_ice > 0 else '南半球本来就无冰'}")
 
