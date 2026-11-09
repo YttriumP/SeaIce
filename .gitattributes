@@ -1,0 +1,8 @@
+# 换行符统一为 LF：Windows 编辑、Linux 运行都不会带 CRLF
+* text=auto
+
+*.py text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
