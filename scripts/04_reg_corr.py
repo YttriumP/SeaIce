@@ -57,8 +57,31 @@ def load_wind() -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
     return years, lat, lon, fields
 
 
+LAT_MIN = 55.0      # 图只画 55°N 以北（数据是全球网格，全画会把北极压成圆心一点点）
+ARROW_DEG = 2.4     # 参考矢量在图上占的半径长度（度）
+
+
+def _nice(v: float) -> float:
+    """把数值修约到 1/1.5/2/2.5/3/4/5/6/8 ×10^k，用作参考矢量标尺。"""
+    if not np.isfinite(v) or v <= 0:
+        return 1.0
+    e = 10.0 ** np.floor(np.log10(v))
+    for m in (1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10):
+        if m * e >= v:
+            return round(m * e, 10)
+    return 10.0 * e
+
+
+def _polar(lon: np.ndarray, lat: np.ndarray):
+    """等距方位投影（北极中心）：rho = 90-lat，X = rho sinλ，Y = −rho cosλ。"""
+    lam = np.deg2rad(lon)
+    rho = 90.0 - lat
+    TH, RR = np.meshgrid(lam, rho)
+    return TH, RR, RR * np.sin(TH), -RR * np.cos(TH)
+
+
 def plot(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray) -> None:
-    """极射赤面正投影（球心极坐标，手工变换，不依赖 cartopy）。绘图失败不影响 NC 产物。"""
+    """极区地图：着色 = v 风与 SIE 的相关，箭头 = 回归矢量，点 = 通过 0.05 显著性。"""
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -68,36 +91,72 @@ def plot(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray) -> None:
         return
 
     try:
-        lam = np.deg2rad(lon)
-        rho = 90.0 - lat
-        TH, RR = np.meshgrid(lam, rho)
-        X, Y = RR * np.sin(TH), -RR * np.cos(TH)
+        north = lat >= LAT_MIN
+        lat_n = lat[north]
+        # 经度接缝：末尾补一列 360°，否则 0° 处会留一条白色楔形
+        lon_c = np.append(lon, lon[0] + 360.0)
+        TH, RR, X, Y = _polar(lon_c, lat_n)          # 闭合网格：着色与打点用
+        TH0, _, X0, Y0 = _polar(lon, lat_n)          # 原始网格：矢量用（列数与数据一致）
+        circ = np.linspace(0, 2 * np.pi, 361)
+        step = 4                                   # 10° 一个箭头：少而清楚
 
-        fig, axes = plt.subplots(1, 2, figsize=(11, 5.6), subplot_kw={"aspect": "equal"})
+        fig, axes = plt.subplots(1, 2, figsize=(9.4, 5.4), constrained_layout=True,
+                                 subplot_kw={"aspect": "equal"})
         for ax, s in zip(axes, SEASONS):
-            pc = ax.pcolormesh(X, Y, corr[f"r_v_{s}"], cmap="RdBu_r", vmin=-0.8, vmax=0.8,
-                               shading="gouraud")
-            step = 2
-            th = TH[::step, ::step]
-            bu, bv = reg[f"b_u_{s}"][::step, ::step], reg[f"b_v_{s}"][::step, ::step]
-            # 把 (u, v) 旋转到投影平面：east→(cosλ, sinλ)，north→(−sinλ, cosλ)
+            z = corr[f"r_v_{s}"][north, :]
+            r_v = np.concatenate([z, z[:, :1]], axis=1)
+            pc = ax.pcolormesh(X, Y, r_v, cmap="RdBu_r", vmin=-0.8, vmax=0.8,
+                               shading="gouraud", rasterized=True)
+
+            # 显著性：|r| > 0.355 处打点（抽样，避免糊成一片）
+            sig = (np.abs(r_v) > R_CRIT)[::2, ::2]
+            ax.scatter(X[::2, ::2][sig], Y[::2, ::2][sig], s=2.0, c="0.18",
+                       marker=".", linewidths=0, alpha=0.45, rasterized=True)
+
+            # 回归矢量：先旋转到投影平面，再按参考矢量统一缩放
+            th = TH0[::step, ::step]
+            bu = reg[f"b_u_{s}"][north, :][::step, ::step]
+            bv = reg[f"b_v_{s}"][north, :][::step, ::step]
             qu = bu * np.cos(th) - bv * np.sin(th)
             qv = bu * np.sin(th) + bv * np.cos(th)
-            scale = max(float(np.hypot(qu, qv).max()), 1e-9) / 4.0
-            ax.quiver(X[::step, ::step], Y[::step, ::step], qu, qv,
-                      color="k", scale=scale, width=0.0035, pivot="middle")
-            circ = np.linspace(0, 2 * np.pi, 200)
-            ax.plot(10 * np.sin(circ), -10 * np.cos(circ), color="0.75", lw=0.4)
-            ax.set_axis_off()
-            ax.set_title(f"{SEASONS[s]}", fontsize=11)
+            ref = _nice(float(np.nanpercentile(np.hypot(qu, qv), 92)))
+            q = ax.quiver(X0[::step, ::step], Y0[::step, ::step], qu, qv,
+                          scale=ref / ARROW_DEG, scale_units="xy", angles="xy",
+                          color="0.08", width=0.0022, headwidth=3.6, headlength=4.6,
+                          headaxislength=4.0, pivot="middle")
+            # 参考矢量放在左下角（55°N 圆外的空白区），避免被 tight bbox 裁掉
+            ax.quiverkey(q, 0.055, 0.055, ref, f"{ref:g} m/s per $10^6$ km$^2$",
+                         coordinates="axes", labelpos="E", labelsep=0.04,
+                         fontproperties={"size": 6.5}, labelcolor="0.3")
 
-        cb = fig.colorbar(pc, ax=axes, shrink=0.7, pad=0.02)
-        cb.set_label("correlation with Sep SIE (v-wind)", fontsize=9)
-        fig.suptitle("925 hPa wind regressed on September SIE, 1979-2009\n"
-                     "shading: r of v-wind; arrows: regression (m/s per $10^6$ km$^2$)",
-                     fontsize=10)
+            # 经纬网 + 纬度标签（放右侧圈外，避免压住数据）
+            for r_, lab in ((35, "55°N"), (30, "60°N"), (20, "70°N"), (10, "80°N")):
+                ax.plot(r_ * np.sin(circ), -r_ * np.cos(circ),
+                        color="0.72", lw=0.35, zorder=3)
+                ax.text(r_ + 0.9, 0.0, lab, fontsize=5.5, color="0.35",
+                        ha="left", va="center", zorder=6,
+                        bbox={"boxstyle": "round,pad=0.12", "fc": "white",
+                              "ec": "none", "alpha": 0.8})
+            for ang in range(0, 360, 45):
+                a = np.deg2rad(ang)
+                ax.plot([0, 35 * np.sin(a)], [0, -35 * np.cos(a)],
+                        color="0.88", lw=0.3, zorder=0)
+
+            ax.set_xlim(-37, 39)
+            ax.set_ylim(-37, 37)
+            ax.set_aspect("equal")
+            ax.axis("off")
+            ax.set_title(SEASONS[s], fontsize=10, pad=2)
+
+        cb = fig.colorbar(pc, ax=axes, shrink=0.62, pad=0.02, extend="both")
+        cb.set_label("correlation between v-wind and Sep SIE", fontsize=7.5)
+        cb.ax.tick_params(labelsize=7)
+        fig.suptitle("925 hPa wind regressed on September SIE, 1979-2009   "
+                     "(shading: r of v-wind; dots: |r| > 0.355, p < 0.05)",
+                     fontsize=8.5)
         FIG.mkdir(parents=True, exist_ok=True)
-        fig.savefig(FIG / "02_reg_maps.png", dpi=300, bbox_inches="tight")
+        fig.savefig(FIG / "02_reg_maps.png", dpi=300, bbox_inches="tight",
+                    facecolor="white")
         plt.close(fig)
         print(f"[图] {FIG / '02_reg_maps.png'}")
     except Exception as exc:  # noqa: BLE001 - 图是附属产物，别让它拖垮统计结果
