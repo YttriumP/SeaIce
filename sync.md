@@ -72,6 +72,40 @@ git clone git@github.com:YttriumP/SeaIce.git .
 
 思路：本地同时推到 GitHub 和服务器上的一个**裸仓库**，服务器从裸仓库拉。
 
+### B0. 服务器上已经有 clone（常见：GitHub 时通时不通）
+
+**不要重新 clone**，会丢掉服务器上的提交。改成"把裸库接到现有 clone 上"：
+
+```bash
+# 服务器
+cd ~/lcx/SeaIce
+git log --oneline -5              # 先记住服务器上有哪些提交
+mkdir -p ~/repos
+git init --bare ~/repos/SeaIce.git
+git remote rename origin github   # 保留 GitHub 的 remote，改名备查
+git remote add origin ~/repos/SeaIce.git
+git push -u origin main           # 用服务器现有提交给裸库"播种"
+```
+
+```powershell
+# 本地
+cd "C:\Users\31504\Documents\deepseek-harness\default-workspace\seaice-teleconnection"
+git remote add server Server:repos/SeaIce.git
+git fetch server
+git log --oneline --graph --all -20
+```
+
+看 `--graph` 的输出决定下一步：
+
+| 情况 | 处理 |
+|---|---|
+| 本地没有服务器没有的提交 | `git merge --ff-only server/main` |
+| 两边各有一些提交 | `git pull --rebase server main`，再 `git push server main` |
+| 只有本地有新提交 | 直接 `git push server main` |
+
+> 一旦这么做，**真源就变成服务器上的裸仓库 `~/repos/SeaIce.git`**，GitHub 降级为"能连的时候推一次"的备份。
+> 之后别两边各自提交又都不推，否则每次都要 rebase。
+
 ### B1. 服务器上建裸仓库（只需一次）
 
 ```bash
