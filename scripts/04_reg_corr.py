@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 04_reg_corr.py —— 925 hPa 风场对 9 月 SIE 的回归图与相关图
@@ -102,7 +102,7 @@ def _samples(lat_n: np.ndarray, lon: np.ndarray, u: np.ndarray, v: np.ndarray):
     for j, phi in enumerate(lat_n):
         if phi > LAT_ARROW_MAX:
             continue
-        s = max(2, int(round(1.5 / max(np.cos(np.deg2rad(phi)), 0.06))))
+        s = max(2, int(round(1.0 / max(np.cos(np.deg2rad(phi)), 0.06))))
         la.append(np.full(lon[::s].size, phi))
         lo.append(lon[::s])
         uu.append(u[j, ::s])
@@ -145,17 +145,17 @@ def _plot_cartopy(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) 
             ax.set_extent([-180, 180, LAT_MIN, 90], crs=ccrs.PlateCarree())
             ax.set_boundary(circle, transform=ax.transAxes)
             ax.add_feature(cfeature.LAND.with_scale("110m"), facecolor="#d9d9d9",
-                           edgecolor="0.35", linewidth=0.35, zorder=2)
-            ax.coastlines(resolution="110m", linewidth=0.35, color="0.35", zorder=3)
+                           edgecolor="0.35", linewidth=0.35, zorder=6)
+            ax.coastlines(resolution="110m", linewidth=0.35, color="0.35", zorder=7)
             ax.gridlines(xlocs=range(-180, 180, 30), ylocs=[70, 80],
-                         linestyle=":", linewidth=0.4, color="0.65")
+                         linestyle=":", linewidth=0.4, color="0.65", zorder=1)
             ax.plot(circ, np.full(circ.size, LAT_MIN), transform=ccrs.PlateCarree(),
-                    color="0.4", lw=0.6, zorder=4)
+                    color="0.4", lw=0.6, zorder=8)
 
             z = corr[f"r_v_{s}"][north, :]
             sig = np.abs(z) > R_CRIT
             ax.scatter(LONg[sig], LATg[sig], s=1.6, c="0.35", marker=".", linewidths=0,
-                       alpha=0.35, transform=ccrs.PlateCarree(), zorder=3.5)
+                       alpha=0.35, transform=ccrs.PlateCarree(), zorder=2)
 
             la_s, lo_s, bu, bv = _samples(lat_n, lon, reg[f"b_u_{s}"][north, :],
                                           reg[f"b_v_{s}"][north, :])
@@ -163,15 +163,16 @@ def _plot_cartopy(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) 
             bu, bv = _clip_mag(bu, bv, ref)
             q = ax.quiver(lo_s, la_s, bu, bv, transform=ccrs.PlateCarree(),
                           scale=ref / 0.12, scale_units="inches", color="0.05",
-                          width=0.0018, headwidth=3.6, headlength=4.4,
-                          headaxislength=4.0, pivot="middle", zorder=4)
-            # 圆内左下角，避开陆地主体
-            ax.quiverkey(q, 0.30, 0.075, ref, f"{ref:g} m/s per $10^6$ km$^2$",
-                         coordinates="axes", labelpos="E", labelsep=0.04,
-                         fontproperties={"size": 6}, labelcolor="0.2")
+                          width=0.0014, headwidth=3.2, headlength=4.0,
+                          headaxislength=3.6, pivot="middle", zorder=3)
+            # 圆内左下角，避开陆地主体；标尺要压在陆地之上
+            k = ax.quiverkey(q, 0.30, 0.075, ref, f"{ref:g} m/s per $10^6$ km$^2$",
+                             coordinates="axes", labelpos="E", labelsep=0.04,
+                             fontproperties={"size": 6}, labelcolor="0.2")
+            k.set_zorder(20)
             for lat_lab in (70, 80):
                 ax.text(180, lat_lab, f"{lat_lab}°N", transform=ccrs.PlateCarree(),
-                        fontsize=5, color="0.35", ha="right", va="center", zorder=6)
+                        fontsize=5, color="0.35", ha="right", va="center", zorder=9)
             ax.set_title(f"{tag} {SEASONS[s]}", fontsize=9, pad=0)
 
         fig.text(0.5, 0.005,
@@ -222,15 +223,15 @@ def _plot_local(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) ->
                 polys.append(Polygon(np.column_stack([r_ * np.sin(seg),
                                                       -r_ * np.cos(seg)]), closed=True))
             coll = PatchCollection(polys, facecolor="#d9d9d9", edgecolor="0.35",
-                                   linewidths=0.35, zorder=2)
+                                   linewidths=0.35, zorder=6)
             coll.set_clip_path(clip)
             ax.add_collection(coll)
 
-        ax.plot(r_out * np.sin(ang), -r_out * np.cos(ang), color="0.4", lw=0.5, zorder=3)
+        ax.plot(r_out * np.sin(ang), -r_out * np.cos(ang), color="0.4", lw=0.5, zorder=8)
         for a in ang[::2]:
             ax.plot([r_out * np.sin(a), (r_out + 0.7) * np.sin(a)],
                     [-r_out * np.cos(a), -(r_out + 0.7) * np.cos(a)],
-                    color="0.4", lw=0.3, zorder=3, clip_on=False)
+                    color="0.4", lw=0.3, zorder=8, clip_on=False)
         for r_ in (10.0, 20.0):
             ax.plot(r_ * np.sin(ang), -r_ * np.cos(ang), ls=":", color="0.65",
                     lw=0.4, zorder=1)
@@ -238,7 +239,7 @@ def _plot_local(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) ->
         z = corr[f"r_v_{s}"][north, :]
         sig = np.abs(z) > R_CRIT
         ax.scatter(X0[sig], Y0[sig], s=1.6, c="0.35", marker=".", linewidths=0,
-                   alpha=0.35, rasterized=True, zorder=3.5)
+                   alpha=0.35, rasterized=True, zorder=2)
 
         la_s, lo_s, bu, bv = _samples(lat_n, lon, reg[f"b_u_{s}"][north, :],
                                       reg[f"b_v_{s}"][north, :])
@@ -252,14 +253,15 @@ def _plot_local(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) ->
         qv = bu * np.sin(lam_s) + bv * np.cos(lam_s)
         q = ax.quiver(xs, ys, qu, qv,
                       scale=ref / ARROW_DEG, scale_units="xy", angles="xy",
-                      color="0.05", width=0.0016, headwidth=3.4, headlength=4.2,
-                      headaxislength=3.8, pivot="middle", zorder=4)
-        ax.quiverkey(q, 0.035, 0.03, ref, f"{ref:g} m/s per $10^6$ km$^2$",
-                     coordinates="axes", labelpos="E", labelsep=0.05,
-                     fontproperties={"size": 6}, labelcolor="0.25")
+                      color="0.05", width=0.0014, headwidth=3.2, headlength=4.0,
+                      headaxislength=3.6, pivot="middle", zorder=3)
+        k = ax.quiverkey(q, 0.035, 0.03, ref, f"{ref:g} m/s per $10^6$ km$^2$",
+                         coordinates="axes", labelpos="E", labelsep=0.05,
+                         fontproperties={"size": 6}, labelcolor="0.25")
+        k.set_zorder(20)
         for r_, lab in ((20.0, "70°N"), (10.0, "80°N")):
             ax.text(0.68 * r_ + 0.4, -0.68 * r_ - 0.4, lab, fontsize=5, color="0.35",
-                    ha="left", va="top", zorder=6,
+                    ha="left", va="top", zorder=9,
                     bbox={"boxstyle": "round,pad=0.1", "fc": "white", "ec": "none",
                           "alpha": 0.7})
 
