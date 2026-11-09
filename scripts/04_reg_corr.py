@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 04_reg_corr.py —— 925 hPa 风场对 9 月 SIE 的回归图与相关图
@@ -48,6 +48,9 @@ LAT_MIN = 60.0          # 视场：60°N 以北，与原文一致
 LAT_ARROW_MAX = 84.0    # 更北不画箭头：经线在极点挤成一圈黑环
 ARROW_DEG = 2.6         # 参考矢量的半径长度（度）
 ARROW_CLIP = 2.2        # 超过参考值 2.2 倍的箭头截断，避免个别极值撑爆版面
+# 出图符号：原文画的是「少冰年对应的风异常」，等价于 −b（b 是每 +1×10⁶ km² SIE 的风异常）。
+# 只影响图，不影响 out/reg_925.nc 里存的 b；改这里前先确认原文图注的符号约定。
+PLOT_SIGN = -1.0
 COAST_NPZ = Path(__file__).with_name("_coastline.npz")
 
 
@@ -119,6 +122,16 @@ def _clip_mag(u: np.ndarray, v: np.ndarray, ref: float) -> tuple[np.ndarray, np.
     return u * f, v * f
 
 
+def _vectors(reg: dict, s: str, north: np.ndarray, lat_n: np.ndarray, lon: np.ndarray):
+    """取一个季节的箭头样本：稀疏化 → 乘 PLOT_SIGN → 定标 → 截断。"""
+    la, lo, bu, bv = _samples(lat_n, lon, reg[f"b_u_{s}"][north, :],
+                              reg[f"b_v_{s}"][north, :])
+    bu, bv = PLOT_SIGN * bu, PLOT_SIGN * bv
+    ref = _arrow_ref(bu, bv)
+    bu, bv = _clip_mag(bu, bv, ref)
+    return la, lo, bu, bv, ref
+
+
 def _plot_cartopy(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) -> bool:
     """优先路径：cartopy 处理投影/陆地/海岸线；数据缺失等任何异常都返回 False。"""
     try:
@@ -157,16 +170,14 @@ def _plot_cartopy(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) 
             ax.scatter(LONg[sig], LATg[sig], s=1.6, c="0.35", marker=".", linewidths=0,
                        alpha=0.35, transform=ccrs.PlateCarree(), zorder=2)
 
-            la_s, lo_s, bu, bv = _samples(lat_n, lon, reg[f"b_u_{s}"][north, :],
-                                          reg[f"b_v_{s}"][north, :])
-            ref = _arrow_ref(bu, bv)
-            bu, bv = _clip_mag(bu, bv, ref)
+            la_s, lo_s, bu, bv, ref = _vectors(reg, s, north, lat_n, lon)
             q = ax.quiver(lo_s, la_s, bu, bv, transform=ccrs.PlateCarree(),
                           scale=ref / 0.12, scale_units="inches", color="0.05",
                           width=0.0014, headwidth=3.2, headlength=4.0,
                           headaxislength=3.6, pivot="middle", zorder=3)
             # 圆内左下角，避开陆地主体；标尺要压在陆地之上
-            k = ax.quiverkey(q, 0.30, 0.075, ref, f"{ref:g} m/s per $10^6$ km$^2$",
+            k = ax.quiverkey(q, 0.30, 0.075, ref,
+                             f"{ref:g} m/s per $10^6$ km$^2$ less SIE",
                              coordinates="axes", labelpos="E", labelsep=0.04,
                              fontproperties={"size": 6}, labelcolor="0.2")
             k.set_zorder(20)
@@ -176,8 +187,8 @@ def _plot_cartopy(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) 
             ax.set_title(f"{tag} {SEASONS[s]}", fontsize=9, pad=0)
 
         fig.text(0.5, 0.005,
-                 "925 hPa wind anomaly regressed on September SIE (arrows, m/s per "
-                 "$10^6$ km$^2$); dots: |r| > 0.355 (p < 0.05)",
+                 "Wind anomaly for a 10^6 km^2 SMALLER September SIE (arrows, m/s per "
+                 "$10^6$ km$^2$ decrease = -b); dots: |r| > 0.355 (p < 0.05)",
                  ha="center", fontsize=6.5, color="0.3")
         _save(fig, plt)
         return True
@@ -241,10 +252,7 @@ def _plot_local(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) ->
         ax.scatter(X0[sig], Y0[sig], s=1.6, c="0.35", marker=".", linewidths=0,
                    alpha=0.35, rasterized=True, zorder=2)
 
-        la_s, lo_s, bu, bv = _samples(lat_n, lon, reg[f"b_u_{s}"][north, :],
-                                      reg[f"b_v_{s}"][north, :])
-        ref = _arrow_ref(bu, bv)
-        bu, bv = _clip_mag(bu, bv, ref)
+        la_s, lo_s, bu, bv, ref = _vectors(reg, s, north, lat_n, lon)
         # 极射赤面投影下把 (u, v) 旋转到图面：east→(cosλ, sinλ)，north→(−sinλ, cosλ)
         lam_s = np.deg2rad(lo_s)
         rho_s = 90.0 - la_s
@@ -255,7 +263,8 @@ def _plot_local(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) ->
                       scale=ref / ARROW_DEG, scale_units="xy", angles="xy",
                       color="0.05", width=0.0014, headwidth=3.2, headlength=4.0,
                       headaxislength=3.6, pivot="middle", zorder=3)
-        k = ax.quiverkey(q, 0.035, 0.03, ref, f"{ref:g} m/s per $10^6$ km$^2$",
+        k = ax.quiverkey(q, 0.035, 0.03, ref,
+                         f"{ref:g} m/s per $10^6$ km$^2$ less SIE",
                          coordinates="axes", labelpos="E", labelsep=0.05,
                          fontproperties={"size": 6}, labelcolor="0.25")
         k.set_zorder(20)
@@ -272,8 +281,8 @@ def _plot_local(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) ->
         ax.set_title(f"{tag} {SEASONS[s]}", fontsize=9, pad=0)
 
     fig.text(0.5, 0.015,
-             "925 hPa wind anomaly regressed on September SIE (arrows, m/s per "
-             "$10^6$ km$^2$); dots: |r| > 0.355 (p < 0.05)",
+             "Wind anomaly for a 10^6 km^2 SMALLER September SIE (arrows, m/s per "
+             "$10^6$ km$^2$ decrease = -b); dots: |r| > 0.355 (p < 0.05)",
              ha="center", fontsize=6.5, color="0.3")
     _save(fig, plt)
 
