@@ -102,7 +102,7 @@ def _samples(lat_n: np.ndarray, lon: np.ndarray, u: np.ndarray, v: np.ndarray):
     for j, phi in enumerate(lat_n):
         if phi > LAT_ARROW_MAX:
             continue
-        s = max(2, int(round(2.0 / max(np.cos(np.deg2rad(phi)), 0.06))))
+        s = max(2, int(round(1.5 / max(np.cos(np.deg2rad(phi)), 0.06))))
         la.append(np.full(lon[::s].size, phi))
         lo.append(lon[::s])
         uu.append(u[j, ::s])
@@ -129,16 +129,21 @@ def _plot_cartopy(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) 
         return False
 
     try:
+        import matplotlib.path as mpath
         proj = ccrs.NorthPolarStereo(central_longitude=0)
         north = lat >= LAT_MIN
         lat_n = lat[north]
         LONg, LATg = np.meshgrid(lon, lat_n)
         circ = np.arange(0.0, 361.0, 1.0)
+        # 把坐标轴裁成圆形，否则 60°N 圆会被矩形边框切掉四个角
+        theta = np.linspace(0.0, 2 * np.pi, 181)
+        circle = mpath.Path(np.column_stack([np.sin(theta), np.cos(theta)]) * 0.5 + 0.5)
 
         fig = plt.figure(figsize=(10.0, 5.4), constrained_layout=True)
         for i, (s, tag) in enumerate(zip(SEASONS, ("(a)", "(b)"))):
             ax = fig.add_subplot(1, 2, i + 1, projection=proj)
             ax.set_extent([-180, 180, LAT_MIN, 90], crs=ccrs.PlateCarree())
+            ax.set_boundary(circle, transform=ax.transAxes)
             ax.add_feature(cfeature.LAND.with_scale("110m"), facecolor="#d9d9d9",
                            edgecolor="0.35", linewidth=0.35, zorder=2)
             ax.coastlines(resolution="110m", linewidth=0.35, color="0.35", zorder=3)
@@ -157,18 +162,19 @@ def _plot_cartopy(reg: dict, corr: dict, lat: np.ndarray, lon: np.ndarray, plt) 
             ref = _arrow_ref(bu, bv)
             bu, bv = _clip_mag(bu, bv, ref)
             q = ax.quiver(lo_s, la_s, bu, bv, transform=ccrs.PlateCarree(),
-                          scale=ref / 0.35, scale_units="inches", color="0.05",
+                          scale=ref / 0.12, scale_units="inches", color="0.05",
                           width=0.0018, headwidth=3.6, headlength=4.4,
                           headaxislength=4.0, pivot="middle", zorder=4)
-            ax.quiverkey(q, 0.04, 0.03, ref, f"{ref:g} m/s per $10^6$ km$^2$",
-                         coordinates="axes", labelpos="E", labelsep=0.05,
-                         fontproperties={"size": 6}, labelcolor="0.25")
+            # 圆内左下角，避开陆地主体
+            ax.quiverkey(q, 0.30, 0.075, ref, f"{ref:g} m/s per $10^6$ km$^2$",
+                         coordinates="axes", labelpos="E", labelsep=0.04,
+                         fontproperties={"size": 6}, labelcolor="0.2")
             for lat_lab in (70, 80):
                 ax.text(180, lat_lab, f"{lat_lab}°N", transform=ccrs.PlateCarree(),
                         fontsize=5, color="0.35", ha="right", va="center", zorder=6)
             ax.set_title(f"{tag} {SEASONS[s]}", fontsize=9, pad=0)
 
-        fig.text(0.5, 0.015,
+        fig.text(0.5, 0.005,
                  "925 hPa wind anomaly regressed on September SIE (arrows, m/s per "
                  "$10^6$ km$^2$); dots: |r| > 0.355 (p < 0.05)",
                  ha="center", fontsize=6.5, color="0.3")
